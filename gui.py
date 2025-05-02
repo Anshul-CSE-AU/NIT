@@ -11,7 +11,7 @@ class SimulationGUI:
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         # Create canvas frame (left side)
-        canvas_frame = tk.Frame(main_frame, width=1200, height=600)
+        canvas_frame = tk.Frame(main_frame, width=800, height=600)
         canvas_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         # Create canvas with scrollbars
@@ -32,27 +32,46 @@ class SimulationGUI:
         # Add controls to the control panel
         tk.Label(control_frame, text="Simulation Controls", font=("Arial", 14, "bold")).pack(pady=(0, 10))
 
-        # Create a sub-frame for number of drones, rows, and columns
-        entry_frame = tk.Frame(control_frame)
-        entry_frame.pack(pady=(0, 10))
+        # Create a sub-frame for number of drones and groups (first row)
+        entry_frame1 = tk.Frame(control_frame)
+        entry_frame1.pack(pady=(0, 5))
 
         # Number of Drones
-        tk.Label(entry_frame, text="Drones:").grid(row=0, column=0, padx=(0, 10))
-        self.entry_drones = tk.Entry(entry_frame, width=5)
-        self.entry_drones.grid(row=0, column=1, padx=(0, 10))
+        drone_frame = tk.Frame(entry_frame1)
+        drone_frame.pack(side=tk.LEFT, padx=(0, 10))
+        tk.Label(drone_frame, text="Drones:").pack(side=tk.LEFT)
+        self.entry_drones = tk.Entry(drone_frame, width=5)
+        self.entry_drones.pack(side=tk.LEFT)
         self.entry_drones.insert(0, "20")
+        
+        # Groups
+        group_frame = tk.Frame(entry_frame1)
+        group_frame.pack(side=tk.LEFT)
+        tk.Label(group_frame, text="Groups:").pack(side=tk.LEFT)
+        self.entry_groups = tk.Entry(group_frame, width=5)
+        self.entry_groups.pack(side=tk.LEFT)
+        self.entry_groups.insert(0, "5")
+
+        # Create a sub-frame for rows and columns (second row)
+        entry_frame2 = tk.Frame(control_frame)
+        entry_frame2.pack(pady=(0, 10))
 
         # Rows
-        tk.Label(entry_frame, text="Rows:").grid(row=0, column=2, padx=(0, 10))
-        self.entry_rows = tk.Entry(entry_frame, width=5)
-        self.entry_rows.grid(row=0, column=3, padx=(0, 10))
+        row_frame = tk.Frame(entry_frame2)
+        row_frame.pack(side=tk.LEFT, padx=(0, 10))
+        tk.Label(row_frame, text="Rows:").pack(side=tk.LEFT)
+        self.entry_rows = tk.Entry(row_frame, width=5)
+        self.entry_rows.pack(side=tk.LEFT)
         self.entry_rows.insert(0, "10")
 
         # Columns
-        tk.Label(entry_frame, text="Columns:").grid(row=0, column=4, padx=(0, 10))
-        self.entry_cols = tk.Entry(entry_frame, width=5)
-        self.entry_cols.grid(row=0, column=5)
+        col_frame = tk.Frame(entry_frame2)
+        col_frame.pack(side=tk.LEFT, padx=(0, 10))
+        tk.Label(col_frame, text="Columns:").pack(side=tk.LEFT)
+        self.entry_cols = tk.Entry(col_frame, width=5)
+        self.entry_cols.pack(side=tk.LEFT)
         self.entry_cols.insert(0, "10")
+
 
         # Create frames for simulation type and map type
         sim_map_frame = tk.Frame(control_frame)
@@ -65,14 +84,13 @@ class SimulationGUI:
         map_type_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(20, 0))
 
         # Add radio buttons for drone simulation type
-        self.sim_type = tk.StringVar(value="centralized-nearest")
+        self.sim_type = tk.StringVar(value="heirarchical-box")
         self.map_type = tk.StringVar(value="grid")
 
         tk.Label(sim_type_frame, text="Simulation Type:", font=("Arial", 12, "bold")).pack(pady=(10, 5), anchor=tk.W)
-        tk.Radiobutton(sim_type_frame, text="Centralized - Nearest", variable=self.sim_type, value="centralized-nearest", command=self.update_map_options).pack(anchor=tk.W)
-        self.allocate_1_radio = tk.Radiobutton(sim_type_frame, text="Centralized - Allocate 1", variable=self.sim_type, value="centralized-allocate-box", command=self.update_map_options)
+        tk.Radiobutton(sim_type_frame, text="Heirarchical - box", variable=self.sim_type, value="heirarchical-box", command=self.update_map_options).pack(anchor=tk.W)
+        self.allocate_1_radio = tk.Radiobutton(sim_type_frame, text="Heirarchical - Voronoi", variable=self.sim_type, value="heirarchical-voronoi", command=self.update_map_options)
         self.allocate_1_radio.pack(anchor=tk.W)
-        tk.Radiobutton(sim_type_frame, text="Centralized - Allocate 2", variable=self.sim_type, value="centralized-allocate-voronoi", command=self.update_map_options).pack(anchor=tk.W)
 
         # Add radio buttons for map type
         tk.Label(map_type_frame, text="Map Type:", font=("Arial", 12, "bold")).pack(pady=(10, 5), anchor=tk.W)
@@ -94,7 +112,7 @@ class SimulationGUI:
         self.update_sim_options()
 
     def update_map_options(self):
-        if self.sim_type.get() == "centralized-allocate-box":
+        if self.sim_type.get() == "heirarchical-box":
             self.map_type.set("grid")
             self.random_radio.config(state=tk.DISABLED)
         else:
@@ -118,5 +136,6 @@ class SimulationGUI:
             'rows': int(self.entry_rows.get()),
             'columns': int(self.entry_cols.get()),
             'sim_type': self.sim_type.get(),
-            'map_type': self.map_type.get()
+            'map_type': self.map_type.get(),
+            'groups': int(self.entry_groups.get())
         }

@@ -1,7 +1,7 @@
 import math
 import numpy as np
 import random
-from scipy.spatial import Voronoi
+from scipy.spatial import Voronoi, voronoi_plot_2d
 import time
 import tkinter as tk
 
@@ -22,14 +22,30 @@ class Simulation:
         self.start_time = None
         self.total_distance_text = None
         self.time_taken_text = None
+        self.groups = []
 
     def start_simulation(self):
+        # Reset simulation state if already running
+        if self.running:
+            self.running = False
+            self.gui.canvas.delete("all")
+            self.drones = []
+            self.mango_trees = []
+            self.available_trees = []
+            self.targets = {}
+            self.bounding_boxes = []
+            self.start_time = None
+            self.total_distance_text = None
+            self.time_taken_text = None
+            self.groups = []
+
         params = self.gui.get_simulation_parameters()
         self.no_of_drones = params['drones']
         self.no_of_rows = params['rows']
         self.no_of_columns = params['columns']
         self.sim_type = params['sim_type']
         self.map_type = params['map_type']
+        self.no_of_groups = params['groups']
 
         self.gui.canvas.delete("all")
 
@@ -44,11 +60,14 @@ class Simulation:
         grid_start_x = 150
         self.mango_trees = self.create_mango_trees(self.no_of_rows, self.no_of_columns, grid_start_x)
         self.available_trees = list(self.mango_trees)
-        self.drones = [Drone(self.gui.canvas, self.home.center_x, self.home.center_y, self.gui.log_message) for _ in range(self.no_of_drones)]
+        
+        self.create_drone_groups()
         self.targets = {}
 
-        if self.sim_type.startswith("centralized-allocate"):
-            self.allocate_areas()
+        if self.sim_type == "heirarchical-box":
+            self.allocate_rectangular_areas()
+        elif self.sim_type == "heirarchical-voronoi":
+            self.allocate_voronoi_areas()
 
         self.assign_tasks_to_drones()
         self.running = True
@@ -72,9 +91,6 @@ class Simulation:
         self.running = not self.running
         if self.running:
             self.gui.master.after(50, self.update)
-
-    def update_available_trees(self):
-        self.available_trees = [tree for tree in self.mango_trees if not tree.harvested and not self.is_tree_targeted(tree)]
 
     def update(self):
         if not self.running:
@@ -112,11 +128,10 @@ class Simulation:
 
     def handle_drone_actions(self, drone):
         if drone.waiting and not drone.has_mango:
-            for tree in self.mango_trees:
+            for tree in drone.assigned_trees:
                 if (drone.x, drone.y) == (tree.x, tree.y) and not tree.harvested:
                     tree.harvest()
                     drone.has_mango = True
-                    self.update_available_trees()
                     drone.move_to_mango_storage(self.mango_storage.center_x, self.mango_storage.center_y)
                     self.gui.log_message(f"Drone harvested mango at ({drone.x}, {drone.y})")
                     return
@@ -126,13 +141,41 @@ class Simulation:
                 drone.has_mango = False
                 self.mango_storage.update_mango_count()
                 self.gui.log_message("Drone dropped mango at storage")
-            self.assign_tasks_to_drones()
+            drone.target = None
+            self.targets.pop(drone, None)
 
         if drone.waiting and (drone.x, drone.y) == (self.home.center_x, self.home.center_y):
             if drone.charge < 50:
                 drone.charge = 50
                 self.gui.log_message("Drone recharged at home")
-            self.assign_tasks_to_drones()
+            drone.target = None
+            self.targets.pop(drone, None)
+
+    def create_drone_groups(self):
+        drones_per_group = self.no_of_drones // self.no_of_groups
+        extra_drones = self.no_of_drones % self.no_of_groups
+
+        for i in range(self.no_of_groups):
+            group_color = self.get_random_color()
+            group_drones = []
+            group_size = drones_per_group + (1 if i < extra_drones else 0)
+
+            for j in range(group_size):
+                is_leader = (j == 0)
+                drone = Drone(self.gui.canvas, self.home.center_x, self.home.center_y, self.gui.log_message, is_leader, group_color)
+                if is_leader:
+                    # Change the leader's outer boundary to black
+                    self.gui.canvas.itemconfig(drone.shape, outline="black")
+                group_drones.append(drone)
+                self.drones.append(drone)
+
+            self.groups.append(group_drones)
+
+        # Now assign trees to groups after all drones are created
+        self.assign_trees_to_groups()
+
+    def get_random_color(self):
+        return f"#{random.randint(0, 255):02x}{random.randint(0, 255):02x}{random.randint(0, 255):02x}"
 
 # Tree creation
     def create_mango_trees(self, rows, cols, start_x):
@@ -194,19 +237,28 @@ class Simulation:
         return trees
 
 # Area allocation
-    def allocate_areas(self):
-        if self.sim_type == "centralized-allocate-box":
-            self.allocate_rectangular_areas()
-        elif self.sim_type == "centralized-allocate-voronoi":
-            self.allocate_voronoi_areas()
+    def assign_trees_to_groups(self):
+        trees_per_group = len(self.mango_trees) // self.no_of_groups
+        extra_trees = len(self.mango_trees) % self.no_of_groups
+
+        start_index = 0
+        for i, group in enumerate(self.groups):
+            end_index = start_index + trees_per_group + (1 if i < extra_trees else 0)
+            group_trees = self.mango_trees[start_index:end_index]
+            
+            # Assign trees to the group
+            for drone in group:
+                drone.assigned_trees = group_trees.copy()  # Make a copy of the trees list for each drone
+
+            start_index = end_index
 
     def allocate_rectangular_areas(self):
-        trees_per_drone = len(self.mango_trees) // len(self.drones)
-        extra_trees = len(self.mango_trees) % len(self.drones)
-        
+        trees_per_group = len(self.mango_trees) // self.no_of_groups
+        extra_trees = len(self.mango_trees) % self.no_of_groups
+
         start_index = 0
-        for i, drone in enumerate(self.drones):
-            end_index = start_index + trees_per_drone + (1 if i < extra_trees else 0)
+        for i, group in enumerate(self.groups):
+            end_index = start_index + trees_per_group + (1 if i < extra_trees else 0)
             allocated_trees = self.mango_trees[start_index:end_index]
             
             if allocated_trees:
@@ -220,18 +272,22 @@ class Simulation:
                 bbox = self.gui.canvas.create_rectangle(
                     min_x - padding, min_y - padding,
                     max_x + padding, max_y + padding,
-                    outline=drone.color, width=2
+                    outline=group[0].color, width=2
                 )
-                self.bounding_boxes.append((drone, bbox, allocated_trees))
+                self.bounding_boxes.append((group, bbox, allocated_trees))
                 
-                # Add drone number to the bounding box
+                # Add group number to the bounding box
                 self.gui.canvas.create_text(
                     (min_x + max_x) / 2,
                     min_y - 20,
-                    text=f"Drone {i+1}",
-                    fill=drone.color
+                    text=f"Group {i+1}",
+                    fill=group[0].color
                 )
-            
+
+            # Assign trees to all drones in the group
+            for drone in group:
+                drone.assigned_trees = allocated_trees
+
             start_index = end_index
 
     def allocate_voronoi_areas(self):
@@ -239,7 +295,7 @@ class Simulation:
         tree_positions = np.array([(tree.x, tree.y) for tree in self.mango_trees])
 
         # Generate random points for Voronoi diagram
-        num_points = min(len(self.drones), len(self.mango_trees))
+        num_points = min(self.no_of_groups, len(self.mango_trees))
         points = tree_positions[np.random.choice(len(tree_positions), num_points, replace=False)]
 
         # Compute Voronoi diagram
@@ -247,27 +303,31 @@ class Simulation:
 
         # Assign trees to regions
         tree_regions = [[] for _ in range(num_points)]
-        for i, tree in enumerate(self.mango_trees):
+        for tree in self.mango_trees:
             distances = np.sqrt(np.sum((points - [tree.x, tree.y])**2, axis=1))
             closest_point = np.argmin(distances)
             tree_regions[closest_point].append(tree)
 
         # Create irregular bounding boxes
-        for i, (drone, region_trees) in enumerate(zip(self.drones, tree_regions)):
+        for i, (group, region_trees) in enumerate(zip(self.groups, tree_regions)):
             if region_trees:
                 hull = self.compute_convex_hull([(tree.x, tree.y) for tree in region_trees])
                 
                 # Create polygon on canvas
-                polygon = self.gui.canvas.create_polygon(hull, outline=drone.color, fill='', width=2)
-                self.bounding_boxes.append((drone, polygon, region_trees))
+                polygon = self.gui.canvas.create_polygon(hull, outline=group[0].color, fill='', width=2)
+                self.bounding_boxes.append((group, polygon, region_trees))
                 
-                # Add drone number to the bounding box
+                # Add group number to the bounding box
                 centroid = np.mean(hull, axis=0)
                 self.gui.canvas.create_text(
                     centroid[0], centroid[1],
-                    text=f"Drone {i+1}",
-                    fill=drone.color
+                    text=f"Group {i+1}",
+                    fill=group[0].color
                 )
+
+                # Assign trees to all drones in the group
+                for drone in group:
+                    drone.assigned_trees = region_trees
 
     def compute_convex_hull(self, points):
         # Graham scan algorithm for convex hull
@@ -294,57 +354,50 @@ class Simulation:
 
 # Task allocation
     def assign_tasks_to_drones(self):
-        if self.sim_type == "centralized-nearest":
-            self.assign_tasks_nearest()
-        elif self.sim_type.startswith("centralized-allocate"):
-            self.assign_tasks_allocated()
+        if self.sim_type == "heirarchical-box":
+            self.assign_tasks_box()
+        elif self.sim_type == "heirarchical-voronoi":
+            self.assign_tasks_box()
 
-    def assign_tasks_nearest(self):
-        for drone in self.drones:
-            if drone.waiting or drone.has_mango or drone.target:
-                continue
-            if self.available_trees and drone.charge > 30:
-                target_tree = self.find_nearest_unharvested_tree(drone, self.available_trees)
-                if target_tree:
-                    self.available_trees.remove(target_tree)
-                    self.targets[drone] = target_tree
-                    drone.set_target(target_tree.x, target_tree.y)
-            elif drone.charge <= 30:
-                drone.set_target(self.home.center_x, self.home.center_y)
-            elif not all(tree.harvested for tree in self.mango_trees):
-                # Wait for trees to become available
-                pass
-            else:
-                drone.return_home()
+    def assign_tasks_box(self):
+        all_tasks_complete = all(tree.harvested for tree in self.mango_trees)
 
-    def assign_tasks_allocated(self):
-        for drone, _, allocated_trees in self.bounding_boxes:
-            if drone.waiting or drone.has_mango or drone.target:
-                continue
-            if drone.charge > 30:
-                unharvested_trees = [tree for tree in allocated_trees if not tree.harvested]
-                if unharvested_trees:
-                    target_tree = self.find_nearest_unharvested_tree(drone, unharvested_trees)
-                    if target_tree:
-                        self.targets[drone] = target_tree
+        for group, bbox, allocated_trees in self.bounding_boxes:
+            unharvested_trees = [tree for tree in allocated_trees if not tree.harvested]
+
+            for drone in group:
+                if drone.target or drone.waiting or drone.has_mango:
+                    continue
+
+                if drone.charge <= 30:
+                    drone.set_target(self.home.center_x, self.home.center_y)
+                elif unharvested_trees:
+                    available_trees = [tree for tree in unharvested_trees if not self.is_tree_targeted(tree)]
+                    if available_trees:
+                        target_tree = min(available_trees, key=lambda tree: ((drone.x - tree.x)**2 + (drone.y - tree.y)**2)**0.5)
                         drone.set_target(target_tree.x, target_tree.y)
-                else:
+                        self.targets[drone] = target_tree
+                        unharvested_trees.remove(target_tree)
+                elif all_tasks_complete and (drone.x, drone.y) != (self.home.center_x, self.home.center_y):
                     drone.return_home()
-            elif drone.charge <= 30:
-                drone.set_target(self.home.center_x, self.home.center_y)
+
+    def assign_tasks_voronoi(self):
+        # Ensure Voronoi areas are allocated
+        self.allocate_voronoi_areas()
+
+        # Assign trees to drones within each Voronoi region
+        for group, _, region_trees in self.bounding_boxes:
+            for drone in group:
+                drone.assigned_trees = region_trees
+
+        # No need to draw Voronoi diagram again as it's already done in allocate_voronoi_areas
+        print("Tasks assigned to drones based on Voronoi areas.")
 
     def is_tree_targeted(self, tree):
         return any(tree == target for target in self.targets.values())
 
-    def find_nearest_unharvested_tree(self, drone, available_trees):
-        min_distance = float('inf')
-        nearest_tree = None
-        for tree in available_trees:
-            distance = math.sqrt((drone.x - tree.x) ** 2 + (drone.y - tree.y) ** 2)
-            if distance < min_distance:
-                min_distance = distance
-                nearest_tree = tree
-        return nearest_tree
+
+
 
 
 if __name__ == "__main__":

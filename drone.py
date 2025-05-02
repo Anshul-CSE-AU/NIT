@@ -3,7 +3,7 @@ import time
 import random
 
 class Drone:
-    def __init__(self, canvas, home_x, home_y, log_callback):
+    def __init__(self, canvas, home_x, home_y, log_callback, is_leader=False, group_color=None):
         self.canvas = canvas
         self.home_x = home_x
         self.home_y = home_y
@@ -13,14 +13,16 @@ class Drone:
         self.speed = 5
         self.charge = 50
         self.target = None
-        self.color = self.get_random_color()
-        self.shape = canvas.create_oval(self.x-self.size/2, self.y-self.size/2, self.x+self.size/2, self.y+self.size/2, fill=self.color, outline="white", width=2)
+        self.color = group_color if group_color else self.get_random_color()
+        self.is_leader = is_leader
+        self.shape = canvas.create_oval(self.x-self.size/2, self.y-self.size/2, self.x+self.size/2, self.y+self.size/2, fill=self.color, outline="white", width=2) if self.is_leader else canvas.create_oval(self.x-self.size/2, self.y-self.size/2, self.x+self.size/2, self.y+self.size/2, fill=self.color, outline="white", width=2)
         self.waiting = False
         self.wait_start_time = None
         self.wait_duration = 0
         self.has_mango = False
         self.log_callback = log_callback
         self.distance_travelled = 0
+        self.assigned_trees = []  # Initialize assigned_trees as an empty list
 
     def get_random_color(self):
         return f"#{random.randint(0, 255):02x}{random.randint(0, 255):02x}{random.randint(0, 255):02x}"
